@@ -5,6 +5,11 @@ from functools import reduce
 
 import pydantic
 import typing_extensions
+
+from pydantic_core import CoreSchema, core_schema
+from pydantic import GetCoreSchemaHandler, TypeAdapter
+from typing import Any
+
 from dateutil.tz.tz import tzutc
 from jira.client import JIRA as BaseJIRA
 from requests.cookies import RequestsCookieJar
@@ -30,8 +35,10 @@ class ExtraFieldNotFoundError(Exception):
 class JiraExtraFields(frozenset):
 
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(cls, handler(str))
 
     @classmethod
     def validate(cls, extra_fields_raw):
@@ -94,7 +101,8 @@ class JiraConfig(config.ServiceConfig):
     verify_ssl: bool = True
     version: int = 5
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def require_password_xor_PAT(cls, values):
         if ((values['password'] and values['PAT'])
                 or not (values['password'] or values['PAT'])):

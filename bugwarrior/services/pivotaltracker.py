@@ -20,8 +20,7 @@ class PivotalTrackerConfig(config.ServiceConfig):
 
     version: typing_extensions.Literal['v5', 'edge'] = 'v5'
     host: config.StrippedTrailingSlashUrl = config.StrippedTrailingSlashUrl(
-        'https://www.pivotaltracker.com/services',
-        scheme='https', host='pivotaltracker.com')
+        'https://www.pivotaltracker.com/services')
     exclude_projects: config.ConfigList = config.ConfigList([])
     exclude_stories: config.ConfigList = config.ConfigList([])
     exclude_tags: config.ConfigList = config.ConfigList([])

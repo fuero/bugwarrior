@@ -7,6 +7,10 @@ from urllib.parse import quote
 import requests
 import typing_extensions
 
+from pydantic_core import CoreSchema, core_schema
+from pydantic import GetCoreSchemaHandler, TypeAdapter, HttpUrl
+from typing import Any
+
 from bugwarrior import config
 from bugwarrior.services import IssueService, Issue, ServiceClient
 
@@ -16,8 +20,10 @@ log = logging.getLogger(__name__)
 class EscapedStr(str):
 
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(cls, handler(str))
 
     @classmethod
     def validate(cls, value):
@@ -30,8 +36,7 @@ class AzureDevopsConfig(config.ServiceConfig):
     project: EscapedStr
     organization: EscapedStr
 
-    host: config.NoSchemeUrl = config.NoSchemeUrl(
-        'dev.azure.com', scheme='https', host='azure.com')
+    host: HttpUrl = HttpUrl('https://dev.azure.com')
     wiql_filter: str = ''
 
 

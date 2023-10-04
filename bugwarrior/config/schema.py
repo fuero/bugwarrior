@@ -5,9 +5,14 @@ import re
 import sys
 import typing
 
-import pydantic.error_wrappers
+from pydantic_core import CoreSchema, core_schema
+from pydantic import GetCoreSchemaHandler, TypeAdapter, ConfigDict
+import pydantic
+import pydantic_settings
 import taskw
 import typing_extensions
+
+from typing import Any
 
 from bugwarrior.services import get_service
 
@@ -15,17 +20,16 @@ from .data import BugwarriorData
 
 log = logging.getLogger(__name__)
 
-
 class StrippedTrailingSlashUrl(pydantic.AnyUrl):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(cls, handler(str))
 
     @classmethod
     def validate(cls, value, field, config):
         return super().validate(value.rstrip('/'), field, config)
-
-
-class UrlSchemeError(pydantic.errors.UrlSchemeError):
-    msg_template = "URL should not include scheme ('{scheme}')"
-
 
 class NoSchemeUrl(StrippedTrailingSlashUrl):
 
@@ -46,13 +50,14 @@ class NoSchemeUrl(StrippedTrailingSlashUrl):
 
         return parts
 
-
 # Pydantic complicates the use of sets or lists as default values.
 class ConfigList(frozenset):
 
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(cls, handler(str))
 
     @classmethod
     def validate(cls, value):
@@ -64,13 +69,14 @@ class ConfigList(frozenset):
         except AttributeError:  # not a string, presumably an iterable
             return value
 
-
 # HACK https://stackoverflow.com/a/34116756
 class ExpandedPath(type(pathlib.Path())):  # type: ignore
 
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(cls, handler(str))
 
     @classmethod
     def validate(cls, path):
@@ -94,18 +100,12 @@ class TaskrcPath(ExpandedPath):
         return expanded_path
 
 
-class PydanticConfig(pydantic.BaseConfig):
-    allow_mutation = False  # config is faux-immutable
-    extra = 'forbid'  # do not allow undeclared fields
-    validate_all = True  # validate default fields
-
-
 class MainSectionConfig(pydantic.BaseModel):
 
-    class Config(PydanticConfig):
-        # To set BugwarriorData based on taskrc:
-        allow_mutation = True
-        arbitrary_types_allowed = True
+    model_config: dict = {
+        "frozen": False,
+        "arbitrary_types_allowed": True
+    }
 
     # required
     targets: ConfigList
@@ -150,10 +150,10 @@ class Notifications(pydantic.BaseModel):
     only_on_new_tasks: bool = False
 
 
-class SchemaBase(pydantic.BaseSettings):
-    class Config(PydanticConfig):
-        # Allow extra top-level sections so all targets don't have to be selected.
-        extra = 'ignore'
+class SchemaBase(pydantic_settings.BaseSettings):
+    model_config: ConfigDict(
+        extra='ignore'
+    )
 
     hooks: Hooks = Hooks()
     notifications: Notifications = Notifications()
@@ -198,7 +198,7 @@ class ValidationErrorEnhancedMessages(list):
                     yield from self.flatten(error.exc, error_loc)
                 else:
                     e = pydantic.error_wrappers.error_dict(
-                        error.exc, PydanticConfig, error_loc)
+                        error.exc, model_config, error_loc)
                     yield self.display_error(e, error, err.model)
             elif isinstance(error, list):
                 yield from self.flatten(error, loc=loc)
@@ -242,14 +242,16 @@ def validate_config(config: dict, main_section: str, config_path: str) -> dict:
     # Construct Service Models
     target_schemas = {target: (get_service(service).CONFIG_SCHEMA, ...)
                       for target, service in servicemap.items()}
+    flavors = {flavor: (MainSectionConfig, ...)
+              for flavor in config.get('flavor', {}).values()}
 
+    MainSectionConfig.model_rebuild()
     # Construct Validation Model
     bugwarrior_config_model = pydantic.create_model(
         'bugwarriorrc',
         __base__=SchemaBase,
         general=(MainSectionConfig, ...),
-        flavor={flavor: (MainSectionConfig, ...)
-                for flavor in config.get('flavor', {}).values()},
+        **flavors,
         **target_schemas)
 
     # Validate
@@ -272,8 +274,12 @@ _ServiceConfig = pydantic.create_model(
 
 
 class ServiceConfig(_ServiceConfig):  # type: ignore  # (dynamic base class)
-    """ Base class for service configurations. """
-    Config = PydanticConfig
+    """ Base config for service configurations. """
+    model_config: ConfigDict(
+        frozen = True,          # config is faux-immutable
+        extra = 'forbid',       # do not allow undeclared fields
+        validate_default = True # validate default fields
+    )
 
     # added during validation (computed field support will land in pydantic-2)
     templates: dict = {}
@@ -285,8 +291,9 @@ class ServiceConfig(_ServiceConfig):  # type: ignore  # (dynamic base class)
     add_tags: ConfigList = ConfigList([])
     description_template: typing.Optional[str] = None
 
-    @pydantic.root_validator
-    def compute_templates(cls, values):
+    @pydantic.model_validator(mode='before')
+    @classmethod
+    def compute_templates(cls, values: Any) -> Any:
         """ Get any defined templates for configuration values.
 
         Users can override the value of any Taskwarrior field using
@@ -313,13 +320,15 @@ class ServiceConfig(_ServiceConfig):  # type: ignore  # (dynamic base class)
         generated issue was.
 
         """
-        for key in taskw.task.Task.FIELDS.keys():
-            template = values.get(f'{key}_template')
-            if template is not None:
-                values['templates'][key] = template
+        if isinstance(values, dict):
+            for key in taskw.task.Task.FIELDS.keys():
+                template = values.get(f'{key}_template')
+                if template is not None:
+                    values['templates'][key] = template
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='after')
+    @classmethod
     def deprecate_filter_merge_requests(cls, values):
         if hasattr(cls, '_DEPRECATE_FILTER_MERGE_REQUESTS'):
             if values['filter_merge_requests'] != 'Undefined':
@@ -333,7 +342,8 @@ class ServiceConfig(_ServiceConfig):  # type: ignore  # (dynamic base class)
                 values['include_merge_requests'] = True
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='after')
+    @classmethod
     def deprecate_project_name(cls, values):
         if hasattr(cls, '_DEPRECATE_PROJECT_NAME'):
             if values['project_name'] != '':

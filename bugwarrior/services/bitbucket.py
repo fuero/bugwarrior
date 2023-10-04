@@ -30,7 +30,8 @@ class BitbucketConfig(config.ServiceConfig):
     include_merge_requests: typing.Union[bool, typing_extensions.Literal['Undefined']] = 'Undefined'
     project_owner_prefix: bool = False
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def deprecate_password_authentication(cls, values):
         if values['login'] != 'Undefined' or values['password'] != 'Undefined':
             log.warning(

@@ -48,7 +48,8 @@ class GitlabConfig(config.ServiceConfig):
     merge_request_query: str = ''
     todo_query: str = ''
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def namespace_repo_lists(cls, values):
         """ Add a default namespace to a repository name.  If the name already
         contains a namespace, it will be returned unchanged:
@@ -64,7 +65,8 @@ class GitlabConfig(config.ServiceConfig):
                 for repo in values[repolist]]
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def default_priorities(cls, values):
         for task_type in ['issue', 'todo', 'mr']:
             priority_field = f'default_{task_type}_priority'
@@ -74,7 +76,8 @@ class GitlabConfig(config.ServiceConfig):
                 else values['default_priority'])
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def filter_gitlab_dot_com(cls, values):
         """
         There must be a repository filter if the host is gitlab.com.
@@ -99,7 +102,7 @@ class GitlabConfig(config.ServiceConfig):
                 "there are too many on gitlab.com to fetch them all.")
         return values
 
-    @pydantic.validator('owned', always=True)
+    @pydantic.field_validator('owned')
     def require_owned(cls, v):
         """
         Migrate 'owned' field from default False to default True.

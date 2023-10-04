@@ -3,6 +3,7 @@ import sys
 import urllib.parse
 
 import pydantic
+from pydantic import HttpUrl
 import requests
 import typing_extensions
 
@@ -35,13 +36,13 @@ class GithubConfig(config.ServiceConfig):
     exclude_pull_requests: bool = False
     include_user_issues: bool = True
     involved_issues: bool = False
-    host: config.NoSchemeUrl = config.NoSchemeUrl(
-        'github.com', scheme='https', host='github.com')
+    host: HttpUrl = HttpUrl('https://github.com')
     body_length: int = sys.maxsize
     project_owner_prefix: bool = False
     issue_urls: config.ConfigList = config.ConfigList([])
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def deprecate_password(cls, values):
         if values['password'] != 'Deprecated':
             log.warning(
@@ -49,14 +50,16 @@ class GithubConfig(config.ServiceConfig):
                 '"password" in favor of "token".')
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def require_username_or_query(cls, values):
         if not values['username'] and not values['query']:
             raise ValueError(
                 'section requires one of:\n    username\n    query')
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def issue_urls_consistent_with_host(cls, values):
         issue_url_paths = []
         for url in values['issue_urls']:
@@ -71,7 +74,8 @@ class GithubConfig(config.ServiceConfig):
         values['issue_urls'] = issue_url_paths
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator(mode='before')
+    @classmethod
     def require_username_if_include_user_repos(cls, values):
         if values['include_user_repos'] and not values['username']:
             raise ValueError(

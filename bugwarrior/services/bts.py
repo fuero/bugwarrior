@@ -24,14 +24,14 @@ class BTSConfig(config.ServiceConfig):
     ignore_pkg: config.ConfigList = config.ConfigList([])
     ignore_src: config.ConfigList = config.ConfigList([])
 
-    @pydantic.root_validator
+    @pydantic.model_validator
     def require_email_or_packages(cls, values):
         if not values['email'] and not values['packages']:
             raise ValueError(
                 'section requires one of:\n    email\n    packages')
         return values
 
-    @pydantic.root_validator
+    @pydantic.model_validator
     def udd_needs_email(cls, values):
         if values['udd'] and not values['email']:
             raise ValueError("no 'email' but UDD search was requested")

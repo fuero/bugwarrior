@@ -2,7 +2,6 @@ import unittest
 
 from bugwarrior.config import secrets
 
-
 class TestOracleEval(unittest.TestCase):
 
     def test_echo(self):
